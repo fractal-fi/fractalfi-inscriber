@@ -3,6 +3,7 @@ import { Injectable } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { IUtxoData } from './core/types';
 import { Utils } from './core/utils';
+import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class AppService {
@@ -14,10 +15,13 @@ export class AppService {
   private Signer;
   private Buff;
   private Utils;
+  private _unisatApiKey;
 
   constructor(
     private readonly _httpService: HttpService,
+    private readonly _configService: ConfigService,
   ) {
+    this._unisatApiKey = this._configService.get<string>('UNISAT_API_KEY');
     this.loadUtils();
   }
 
@@ -149,17 +153,32 @@ export class AppService {
   }
 
   async getIncomingUtxo(address: string): Promise<IUtxoData> {
-    const url = `https://mempool.space/api/address/${address}/txs`;
-    console.log(url);
-    const response = await this._httpService.get(url).toPromise();
-    if (response && response.data && response.data.length) {
-      for (let i = 0; i < response.data[0].vout.length; i++) {
-        const output = response.data[0].vout[i];
-        if (output.scriptpubkey_address === address) {
+    const url = `https://open-api-fractal-testnet.unisat.io/v1/indexer/address/${address}/utxo-data?cursor=0&size=16`;
+    const { data } = await this._httpService.get(url, {
+      headers: {
+        accept: 'application/json',
+        Authorization: `Bearer ${this._unisatApiKey}`,
+    },
+    }).toPromise();
+    if (data && data.data && data.data.length) {
+      const txId = data.data.utxo[0].txid;
+      const outsUrl = `https://open-api-fractal-testnet.unisat.io/v1/indexer/tx/${txId}/outs`;
+
+      const outsResponse = await this._httpService.get(url, {
+        headers: {
+          accept: 'application/json',
+          Authorization: `Bearer ${this._unisatApiKey}`,
+      },
+      }).toPromise();
+
+      const outsData = outsResponse.data;
+      for (let i = 0; i < outsResponse.data.length; i++) {
+        const output = outsResponse.data[i];
+        if (output.address === address) {
           return {
-            txid: response.data[0].txid,
+            txid: txId,
             vout: i,
-            amount: output.value,
+            amount: output.satoshi,
           };
         }
       }
